@@ -4,7 +4,7 @@
       <!-- Placar e Status -->
       <div class="row q-mb-md q-gutter-xl text-h6 font-mono text-weight-bold">
         <div>
-          SCORE2: <span class="text-amber">{{ score }}</span>
+          SCORE: <span class="text-amber">{{ score }}</span>
         </div>
         <div>
           LIVES: <span class="text-red">{{ lives }}</span>
