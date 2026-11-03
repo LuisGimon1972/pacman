@@ -40,16 +40,21 @@ export class SpriteAtlas {
     const srcX = col * cellWidth;
     const srcY = row * cellHeight;
 
+    // Fator de escala para reduzir o tamanho visual do personagem (ex: 82% do tile)
+    // Podes ajustar este valor (ex: 0.80 para menor, 0.88 para maior)
+    const scaleFactor = 0.82;
+    const drawSize = destSize * scaleFactor;
+
     ctx.drawImage(
       this.image,
       srcX,
       srcY,
       srcW,
       srcH,
-      destX - destSize / 2,
-      destY - destSize / 2,
-      destSize,
-      destSize,
+      destX - drawSize / 2,
+      destY - drawSize / 2,
+      drawSize,
+      drawSize,
     );
   }
 }

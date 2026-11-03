@@ -79,10 +79,10 @@ const player = ref({
 });
 
 const enemies = ref([
-  { x: 432, y: 432, size: 16, speed: 2, dx: 0, dy: -2, row: 3 },
-  { x: 48, y: 432, size: 16, speed: 2, dx: -2, dy: 0, row: 6 },
-  { x: 432, y: 48, size: 16, speed: 2, dx: 0, dy: 2, row: 3 },
-  { x: 240, y: 240, size: 16, speed: 2, dx: 2, dy: 0, row: 6 },
+  { x: 432, y: 432, size: 16, speed: 2, dx: 0, dy: -2, row: 3 }, // Fantasma Vermelho
+  { x: 48, y: 432, size: 16, speed: 2, dx: -2, dy: 0, row: 6 }, // Fantasma Roxo
+  { x: 432, y: 48, size: 16, speed: 2, dx: 0, dy: 2, row: 3 }, // Fantasma Vermelho 2
+  { x: 240, y: 240, size: 16, speed: 2, dx: 2, dy: 0, row: 6 }, // Fantasma Roxo 2
 ]);
 
 onMounted(() => {
@@ -119,9 +119,11 @@ const drawScene = () => {
       const posY = row * TILE_SIZE + TILE_SIZE / 2;
 
       if (tile === 1) {
-        atlas.draw(ctx, 0, 13, posX, posY, TILE_SIZE);
+        // Bloco de parede texturado (Linha 13, Coluna 2)
+        atlas.draw(ctx, 2, 13, posX, posY, TILE_SIZE, 63, 66);
       } else if (tile === 2) {
-        atlas.draw(ctx, 4, 9, posX, posY, TILE_SIZE * 0.4);
+        // Ponto pequeno (Linha 9, Coluna 4)
+        atlas.draw(ctx, 4, 9, posX, posY, TILE_SIZE * 0.4, 63, 66);
       }
     }
   }
@@ -187,7 +189,8 @@ const updateEnemyAutonomous = (en: any) => {
   const nextX = en.x + en.dx;
   const nextY = en.y + en.dy;
 
-  if (checkWallCollision(nextX, nextY, en.size - 4)) {
+  // Margem ajustada para os inimigos também navegarem suavemente
+  if (checkWallCollision(nextX, nextY, en.size - 7)) {
     const possibleMoves = [
       { dx: 0, dy: -en.speed },
       { dx: 0, dy: en.speed },
@@ -196,7 +199,7 @@ const updateEnemyAutonomous = (en: any) => {
     ];
 
     const validMoves = possibleMoves.filter(
-      (m) => !checkWallCollision(en.x + m.dx, en.y + m.dy, en.size - 4),
+      (m) => !checkWallCollision(en.x + m.dx, en.y + m.dy, en.size - 7),
     );
 
     if (validMoves.length > 0) {
@@ -223,7 +226,8 @@ const gameLoop = () => {
   const nextX = player.value.x + player.value.dx;
   const nextY = player.value.y + player.value.dy;
 
-  if (!checkWallCollision(nextX, nextY, player.value.size - 4)) {
+  // Margem ajustada de -4 para -7 para facilitar a entrada nos corredores e descidas
+  if (!checkWallCollision(nextX, nextY, player.value.size - 7)) {
     player.value.x = nextX;
     player.value.y = nextY;
   } else {
@@ -249,11 +253,11 @@ const gameLoop = () => {
 
   drawScene();
 
+  // Atualiza e desenha os Inimigos
   for (const en of enemies.value) {
     updateEnemyAutonomous(en);
 
-    // Ajustado para TILE_SIZE exato (sem transbordar)
-    atlas.draw(ctx, 0, en.row, en.x, en.y, TILE_SIZE);
+    atlas.draw(ctx, 0, en.row, en.x, en.y, TILE_SIZE, 63, 66);
 
     const distanceToEnemy = Math.hypot(player.value.x - en.x, player.value.y - en.y);
 
@@ -271,13 +275,14 @@ const gameLoop = () => {
     }
   }
 
+  // Mapeia a direção do jogador para a coluna correta do atlas
   let playerCol = 0;
   if (player.value.direction === 'UP') playerCol = 1;
   else if (player.value.direction === 'LEFT') playerCol = 2;
   else if (player.value.direction === 'RIGHT') playerCol = 3;
 
-  // Ajustado para TILE_SIZE exato (sem transbordar)
-  atlas.draw(ctx, playerCol, 0, player.value.x, player.value.y, TILE_SIZE);
+  // Desenha o Jogador (Robô Azul na Linha 0)
+  atlas.draw(ctx, playerCol, 0, player.value.x, player.value.y, TILE_SIZE, 63, 66);
 
   animationFrameId = requestAnimationFrame(gameLoop);
 };
