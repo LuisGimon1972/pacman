@@ -52,9 +52,10 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { MAZE_GRID, TILE_SIZE } from '../game/maze';
 import { checkWallCollision } from '../game/collision';
-import { updateEnemyPosition, type Enemy } from '../game/enemy';
 import { SpriteAtlas } from '../game/spriteAtlas';
 import type { GameState, Direction } from '../game/types';
+
+import atlasImage from '../assets/pacman_atlas.png';
 
 const gameCanvas = ref<HTMLCanvasElement | null>(null);
 const score = ref<number>(0);
@@ -65,8 +66,7 @@ let ctx: CanvasRenderingContext2D | null = null;
 let animationFrameId: number;
 let currentMap: number[][] = [];
 
-// Instancia o gerenciador do Atlas apontando para o arquivo de imagem na pasta public
-const atlas = new SpriteAtlas('/assets/pacman_atlas.png');
+const atlas = new SpriteAtlas(atlasImage);
 
 const player = ref({
   x: 48,
@@ -78,17 +78,12 @@ const player = ref({
   direction: 'RIGHT' as Direction,
 });
 
-const enemy = ref<Enemy & { col: number; row: number }>({
-  x: 432,
-  y: 432,
-  size: 16,
-  speed: 2,
-  dx: 0,
-  dy: -2,
-  color: '#ef4444',
-  col: 0,
-  row: 3, // Linha do Caçador no Atlas
-});
+const enemies = ref([
+  { x: 432, y: 432, size: 16, speed: 2, dx: 0, dy: -2, row: 3 },
+  { x: 48, y: 432, size: 16, speed: 2, dx: -2, dy: 0, row: 6 },
+  { x: 432, y: 48, size: 16, speed: 2, dx: 0, dy: 2, row: 3 },
+  { x: 240, y: 240, size: 16, speed: 2, dx: 2, dy: 0, row: 6 },
+]);
 
 onMounted(() => {
   if (gameCanvas.value) {
@@ -120,29 +115,13 @@ const drawScene = () => {
 
     for (let col = 0; col < currentRow.length; col++) {
       const tile = currentRow[col];
+      const posX = col * TILE_SIZE + TILE_SIZE / 2;
+      const posY = row * TILE_SIZE + TILE_SIZE / 2;
 
       if (tile === 1) {
-        // Renderizando a parede usando o tile do Atlas
-        atlas.draw(
-          ctx,
-          1,
-          10,
-          TILE_SIZE,
-          col * TILE_SIZE + TILE_SIZE / 2,
-          row * TILE_SIZE + TILE_SIZE / 2,
-          TILE_SIZE,
-        );
+        atlas.draw(ctx, 0, 13, posX, posY, TILE_SIZE);
       } else if (tile === 2) {
-        // Fragmento de Dados
-        atlas.draw(
-          ctx,
-          4,
-          9,
-          TILE_SIZE,
-          col * TILE_SIZE + TILE_SIZE / 2,
-          row * TILE_SIZE + TILE_SIZE / 2,
-          16,
-        );
+        atlas.draw(ctx, 4, 9, posX, posY, TILE_SIZE * 0.4);
       }
     }
   }
@@ -155,11 +134,14 @@ const initGame = () => {
   player.value.y = 48;
   player.value.dx = 0;
   player.value.dy = 0;
+  player.value.direction = 'RIGHT';
 
-  enemy.value.x = 432;
-  enemy.value.y = 432;
-  enemy.value.dx = 0;
-  enemy.value.dy = -2;
+  enemies.value = [
+    { x: 432, y: 432, size: 16, speed: 2, dx: 0, dy: -2, row: 3 },
+    { x: 48, y: 432, size: 16, speed: 2, dx: -2, dy: 0, row: 6 },
+    { x: 432, y: 48, size: 16, speed: 2, dx: 0, dy: 2, row: 3 },
+    { x: 240, y: 240, size: 16, speed: 2, dx: 2, dy: 0, row: 6 },
+  ];
 
   resetMap();
   gameState.value = 'PLAYING';
@@ -201,24 +183,43 @@ const handleKeyDown = (e: KeyboardEvent) => {
   player.value.dy = nextDy;
 };
 
-const gameLoop = () => {
-  console.log(
-    'GameLoop chamado | Estado:',
-    gameState.value,
-    '| Ctx existe:',
-    !!ctx,
-    '| Canvas existe:',
-    !!gameCanvas.value,
-  );
+const updateEnemyAutonomous = (en: any) => {
+  const nextX = en.x + en.dx;
+  const nextY = en.y + en.dy;
 
+  if (checkWallCollision(nextX, nextY, en.size - 4)) {
+    const possibleMoves = [
+      { dx: 0, dy: -en.speed },
+      { dx: 0, dy: en.speed },
+      { dx: -en.speed, dy: 0 },
+      { dx: en.speed, dy: 0 },
+    ];
+
+    const validMoves = possibleMoves.filter(
+      (m) => !checkWallCollision(en.x + m.dx, en.y + m.dy, en.size - 4),
+    );
+
+    if (validMoves.length > 0) {
+      const chosen = validMoves[Math.floor(Math.random() * validMoves.length)];
+      if (chosen) {
+        en.dx = chosen.dx;
+        en.dy = chosen.dy;
+      }
+    } else {
+      en.dx = -en.dx;
+      en.dy = -en.dy;
+    }
+  } else {
+    en.x = nextX;
+    en.y = nextY;
+  }
+};
+
+const gameLoop = () => {
   if (gameState.value !== 'PLAYING' || !ctx || !gameCanvas.value) {
-    console.warn('GameLoop abortou porque uma das condições falhou!');
     return;
   }
 
-  if (gameState.value !== 'PLAYING' || !ctx || !gameCanvas.value) return;
-
-  // 1. Movimentação do Jogador
   const nextX = player.value.x + player.value.dx;
   const nextY = player.value.y + player.value.dy;
 
@@ -230,27 +231,6 @@ const gameLoop = () => {
     player.value.dy = 0;
   }
 
-  // 2. Movimentação do Inimigo
-  updateEnemyPosition(enemy.value, player.value.x, player.value.y);
-
-  // 3. Colisão com o Inimigo
-  const distanceToEnemy = Math.hypot(
-    player.value.x - enemy.value.x,
-    player.value.y - enemy.value.y,
-  );
-  if (distanceToEnemy < player.value.size + enemy.value.size - 8) {
-    lives.value -= 1;
-    if (lives.value <= 0) {
-      gameState.value = 'GAMEOVER';
-    } else {
-      player.value.x = 48;
-      player.value.y = 48;
-      player.value.dx = 0;
-      player.value.dy = 0;
-    }
-  }
-
-  // 4. Coleta de Pontos
   const currentTileCol = Math.floor(player.value.x / TILE_SIZE);
   const currentTileRow = Math.floor(player.value.y / TILE_SIZE);
 
@@ -267,26 +247,37 @@ const gameLoop = () => {
     }
   }
 
-  // 5. Renderização geral
   drawScene();
 
-  // Mapeia a coluna do sprite do jogador com base na direção atual
-  let playerCol = 0;
-  if (player.value.direction === 'UP') {
-    playerCol = 1;
-  } else if (player.value.direction === 'LEFT') {
-    playerCol = 2;
-  } else if (player.value.direction === 'RIGHT') {
-    playerCol = 3;
-  } else {
-    playerCol = 0; // DOWN ou padrão
+  for (const en of enemies.value) {
+    updateEnemyAutonomous(en);
+
+    // Ajustado para TILE_SIZE exato (sem transbordar)
+    atlas.draw(ctx, 0, en.row, en.x, en.y, TILE_SIZE);
+
+    const distanceToEnemy = Math.hypot(player.value.x - en.x, player.value.y - en.y);
+
+    if (distanceToEnemy < player.value.size + en.size - 8) {
+      lives.value -= 1;
+      if (lives.value <= 0) {
+        gameState.value = 'GAMEOVER';
+      } else {
+        player.value.x = 48;
+        player.value.y = 48;
+        player.value.dx = 0;
+        player.value.dy = 0;
+      }
+      break;
+    }
   }
 
-  // Desenha o Jogador usando o Sprite Atlas (Linha 0 do atlas)
-  atlas.draw(ctx, playerCol, 0, TILE_SIZE, player.value.x, player.value.y, TILE_SIZE * 1.2);
+  let playerCol = 0;
+  if (player.value.direction === 'UP') playerCol = 1;
+  else if (player.value.direction === 'LEFT') playerCol = 2;
+  else if (player.value.direction === 'RIGHT') playerCol = 3;
 
-  // Desenha o Inimigo usando o Sprite Atlas (Linha 3 do atlas - Caçador)
-  atlas.draw(ctx, 0, 3, TILE_SIZE, enemy.value.x, enemy.value.y, TILE_SIZE * 1.2);
+  // Ajustado para TILE_SIZE exato (sem transbordar)
+  atlas.draw(ctx, playerCol, 0, player.value.x, player.value.y, TILE_SIZE);
 
   animationFrameId = requestAnimationFrame(gameLoop);
 };

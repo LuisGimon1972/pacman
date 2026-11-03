@@ -1,5 +1,3 @@
-// src/game/spriteAtlas.ts
-
 export class SpriteAtlas {
   private image: HTMLImageElement;
   public isLoaded: boolean = false;
@@ -10,52 +8,48 @@ export class SpriteAtlas {
 
     this.image.onload = () => {
       this.isLoaded = true;
-      console.log(`SpriteAtlas carregado com sucesso: ${imageSrc}`);
+      console.log('SpriteAtlas 1024x1024 carregado com sucesso!');
     };
 
     this.image.onerror = (err) => {
-      console.error(`ERRO ao carregar a imagem do Atlas em: ${imageSrc}`, err);
+      console.error('ERRO ao carregar a imagem do Atlas:', err);
     };
   }
 
-  /**
-   * Desenha um sprite específico do atlas no Canvas
-   * @param ctx Contexto 2D do Canvas
-   * @param col Coluna do sprite no atlas
-   * @param row Linha do sprite no atlas
-   * @param tileSize Tamanho de cada célula do sprite (ex: 32x32 ou 64x64)
-   * @param destX Posição X no Canvas do jogo
-   * @param destY Posição Y no Canvas do jogo
-   */
   public draw(
     ctx: CanvasRenderingContext2D,
     col: number,
     row: number,
-    tileSize: number,
     destX: number,
     destY: number,
-    destSize: number = tileSize,
+    destSize: number,
+    srcW: number = 63,
+    srcH: number = 66,
   ) {
-    // Se a imagem ainda não carregou, desenha um quadrado magenta de aviso
     if (!this.isLoaded) {
-      ctx.fillStyle = '#ff00ff'; // Cor de placeholder (magenta)
+      ctx.fillStyle = '#ff00ff';
       ctx.fillRect(destX - destSize / 2, destY - destSize / 2, destSize, destSize);
       return;
     }
 
-    const srcX = col * tileSize;
-    const srcY = row * tileSize;
+    // Grelha 16x16 exata num atlas de 1024x1024 (64px por célula)
+    const cellWidth = this.image.width / 16;
+    const cellHeight = this.image.height / 16;
+
+    // Alinhamento ao canto superior esquerdo de cada célula da grelha
+    const srcX = col * cellWidth;
+    const srcY = row * cellHeight;
 
     ctx.drawImage(
       this.image,
       srcX,
       srcY,
-      tileSize,
-      tileSize, // Recorte na imagem original
+      srcW,
+      srcH,
       destX - destSize / 2,
       destY - destSize / 2,
       destSize,
-      destSize, // Posição de destino centralizada
+      destSize,
     );
   }
 }
