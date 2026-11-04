@@ -1,7 +1,6 @@
 <template>
   <q-page class="flex flex-center bg-grey-10 text-white q-pa-md">
     <div class="column items-center">
-      <!-- Placar e Status -->
       <div class="row q-mb-md q-gutter-xl text-h6 font-mono text-weight-bold">
         <div>
           SCORE: <span class="text-amber">{{ score }}</span>
@@ -17,7 +16,6 @@
         </div>
       </div>
 
-      <!-- Container do Canvas -->
       <div class="canvas-container relative-position">
         <canvas
           ref="gameCanvas"
@@ -26,13 +24,12 @@
           class="game-canvas shadow-15 rounded-borders"
         ></canvas>
 
-        <!-- Overlay de Menu / Game Over -->
         <div
           v-if="gameState !== 'PLAYING'"
           class="absolute-full flex flex-center overlay-bg column q-gutter-md"
         >
           <div class="text-h4 text-weight-bold text-amber">
-            {{ gameState === 'MENU' ? 'CYBER MAZE' : 'GAME OVER' }}
+            {{ gameState === 'MENU' ? 'MEGA PACMAN' : 'GAME OVER' }}
           </div>
           <div v-if="gameState === 'GAMEOVER'" class="text-subtitle1 text-grey-4">
             Pontuação Final: {{ score }}
@@ -87,7 +84,6 @@ const enemies = ref([
   { x: 48, y: 432, size: 16, speed: 2, dx: -2, dy: 0, row: 6 },
 ]);
 
-// Maçã posicionada exatamente sobre a coordenada de um ponto amarelo (ex: Coluna 3, Linha 3)
 const appleItem = ref<{ col: number; row: number; active: boolean }>({
   col: 3,
   row: 3,
@@ -111,8 +107,6 @@ onUnmounted(() => {
 
 const resetMap = () => {
   currentMap = MAZE_GRID.map((row) => [...row]);
-
-  // Assegura que a posição escolhida para a maçã no mapa tem espaço livre/ponto
   appleItem.value.active = true;
 };
 
@@ -145,9 +139,8 @@ const drawScene = () => {
       const posY = row * TILE_SIZE + TILE_SIZE / 2;
 
       if (tile === 1) {
-        atlas.draw(ctx, 2, 13, posX, posY, TILE_SIZE, 63, 66);
+        atlas.draw(ctx, 2, 13, posX, posY, TILE_SIZE, 60, 66);
       } else if (tile === 2) {
-        // Se a maçã estiver ativa nesta mesma coordenada, não desenha o ponto pequeno para dar lugar à maçã
         if (!(
           appleItem.value.active &&
           appleItem.value.col === col &&
@@ -159,7 +152,6 @@ const drawScene = () => {
     }
   }
 
-  // Desenha a maçã exatamente centrada na coordenada do pino amarelo escolhido
   if (appleItem.value.active) {
     const appleX = appleItem.value.col * TILE_SIZE + TILE_SIZE / 2;
     const appleY = appleItem.value.row * TILE_SIZE + TILE_SIZE / 2;
@@ -346,7 +338,7 @@ const gameLoop = () => {
   for (const en of enemies.value) {
     updateEnemyAutonomous(en);
 
-    atlas.draw(ctx, 0, en.row, en.x, en.y, TILE_SIZE, 63, 66);
+    atlas.draw(ctx, 0, en.row, en.x, en.y, TILE_SIZE, 60, 66);
 
     const distanceToEnemy = Math.hypot(player.value.x - en.x, player.value.y - en.y);
 
@@ -364,7 +356,7 @@ const gameLoop = () => {
     }
   }
 
-  let playerCol = 0;
+  let playerCol = 1;
   if (player.value.direction === 'UP') playerCol = 1;
   else if (player.value.direction === 'LEFT') playerCol = 2;
   else if (player.value.direction === 'RIGHT') playerCol = 3;
