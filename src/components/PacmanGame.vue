@@ -67,6 +67,93 @@ let ctx: CanvasRenderingContext2D | null = null;
 let animationFrameId: number;
 let currentMap: number[][] = [];
 
+// Contexto de Áudio da Web Audio API para gerar efeitos sonoros instantâneos
+let audioCtx: AudioContext | null = null;
+
+const initAudio = () => {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+};
+
+// Som ao comer um ponto (Waka / Bip curto clássico)
+const playEatDotSound = () => {
+  if (!audioCtx) return;
+  try {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(440, audioCtx.currentTime); // Nota inicial Lá
+    osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.08); // Sobe o tom rapidamente
+
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.08);
+  } catch (e) {
+    console.error('Erro ao reproduzir som de ponto:', e);
+  }
+};
+
+// Som ao apanhar a maçã/bónus (Jingle alegre)
+const playEatAppleSound = () => {
+  if (!audioCtx) return;
+  try {
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(300, now);
+    osc.frequency.setValueAtTime(500, now + 0.08);
+    osc.frequency.setValueAtTime(750, now + 0.16);
+
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.start();
+    osc.stop(now + 0.3);
+  } catch (e) {
+    console.error('Erro ao reproduzir som da maçã:', e);
+  }
+};
+
+// Som ao morrer / perder vida (Tom descendente grave e dramático)
+const playDeathSound = () => {
+  if (!audioCtx) return;
+  try {
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    osc.type = 'sawtooth'; // Som mais áspero tipo erro/explosão retro
+    osc.frequency.setValueAtTime(350, now);
+    osc.frequency.exponentialRampToValueAtTime(80, now + 0.4); // Desce o tom acentuadamente
+
+    gain.gain.setValueAtTime(0.25, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.start();
+    osc.stop(now + 0.4);
+  } catch (e) {
+    console.error('Erro ao reproduzir som de morte:', e);
+  }
+};
+
 const atlas = new SpriteAtlas(atlasImage);
 
 const player = ref({
@@ -135,7 +222,6 @@ const drawScene = () => {
 
     for (let col = 0; col < currentRow.length; col++) {
       const tile = currentRow[col];
-      // Restabelece o posicionamento centrado exigido pelo atlas.draw para evitar falhas visuais
       const posX = col * TILE_SIZE + TILE_SIZE / 2;
       const posY = row * TILE_SIZE + TILE_SIZE / 2;
 
@@ -162,6 +248,7 @@ const drawScene = () => {
 };
 
 const initGame = () => {
+  initAudio();
   score.value = 0;
   lives.value = 3;
   level.value = 1;
@@ -216,7 +303,6 @@ const handleKeyDown = (e: KeyboardEvent) => {
   player.value.dy = nextDy;
 };
 
-// Inteligência de Perseguição (Chasing AI)
 const updateEnemyAutonomous = (en: any) => {
   const nextX = en.x + en.dx;
   const nextY = en.y + en.dy;
@@ -291,6 +377,7 @@ const gameLoop = () => {
     if (currentRow && currentRow[currentTileCol] === 2) {
       currentRow[currentTileCol] = 0;
       score.value += 10;
+      playEatDotSound();
 
       if (countRemainingDots() === 0) {
         level.value += 1;
@@ -303,7 +390,6 @@ const gameLoop = () => {
 
         const ghostSpeed = Math.min(2 + Math.floor(level.value / 2), 4);
 
-        // 3 fantasmas dinâmicos na 2ª ronda posicionados nos cantos com segurança
         enemies.value = [
           { x: 432, y: 48, size: 16, speed: ghostSpeed, dx: -ghostSpeed, dy: 0, row: 3 },
           { x: 48, y: 432, size: 16, speed: ghostSpeed, dx: 0, dy: -ghostSpeed, row: 4 },
@@ -322,6 +408,7 @@ const gameLoop = () => {
       lives.value += 1;
       appleItem.value.active = false;
       score.value += 50;
+      playEatAppleSound();
     }
   }
 
@@ -336,6 +423,10 @@ const gameLoop = () => {
 
     if (distanceToEnemy < player.value.size + en.size - 8) {
       lives.value -= 1;
+
+      // Toca o efeito sonoro de erro/morte ao perder vida
+      playDeathSound();
+
       if (lives.value <= 0) {
         gameState.value = 'GAMEOVER';
       } else {
