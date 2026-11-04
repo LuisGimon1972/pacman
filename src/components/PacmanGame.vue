@@ -10,6 +10,9 @@
           LIVES: <span class="text-red">{{ lives }}</span>
         </div>
         <div>
+          LEVEL: <span class="text-green">{{ level }}</span>
+        </div>
+        <div>
           STATE: <span class="text-blue">{{ gameState }}</span>
         </div>
       </div>
@@ -55,11 +58,12 @@ import { checkWallCollision } from '../game/collision';
 import { SpriteAtlas } from '../game/spriteAtlas';
 import type { GameState, Direction } from '../game/types';
 
-import atlasImage from '../assets/pacman_atlas.png';
+import atlasImage from '../assets/pacman_atlas.jpg';
 
 const gameCanvas = ref<HTMLCanvasElement | null>(null);
 const score = ref<number>(0);
 const lives = ref<number>(3);
+const level = ref<number>(1);
 const gameState = ref<GameState>('MENU');
 
 let ctx: CanvasRenderingContext2D | null = null;
@@ -79,15 +83,21 @@ const player = ref({
 });
 
 const enemies = ref([
-  { x: 432, y: 432, size: 16, speed: 2, dx: 0, dy: -2, row: 3 }, // Fantasma Vermelho
-  { x: 48, y: 432, size: 16, speed: 2, dx: -2, dy: 0, row: 6 }, // Fantasma Roxo
-  { x: 432, y: 48, size: 16, speed: 2, dx: 0, dy: 2, row: 3 }, // Fantasma Vermelho 2
-  { x: 240, y: 240, size: 16, speed: 2, dx: 2, dy: 0, row: 6 }, // Fantasma Roxo 2
+  { x: 432, y: 432, size: 16, speed: 2, dx: 0, dy: -2, row: 3 },
+  { x: 48, y: 432, size: 16, speed: 2, dx: -2, dy: 0, row: 6 },
 ]);
+
+// Maçã posicionada exatamente sobre a coordenada de um ponto amarelo (ex: Coluna 3, Linha 3)
+const appleItem = ref<{ col: number; row: number; active: boolean }>({
+  col: 3,
+  row: 3,
+  active: false,
+});
 
 onMounted(() => {
   if (gameCanvas.value) {
     ctx = gameCanvas.value.getContext('2d');
+    if (ctx) ctx.imageSmoothingEnabled = false;
     resetMap();
     drawScene();
   }
@@ -101,12 +111,28 @@ onUnmounted(() => {
 
 const resetMap = () => {
   currentMap = MAZE_GRID.map((row) => [...row]);
+
+  // Assegura que a posição escolhida para a maçã no mapa tem espaço livre/ponto
+  appleItem.value.active = true;
+};
+
+const countRemainingDots = (): number => {
+  let count = 0;
+  for (let r = 0; r < currentMap.length; r++) {
+    const currentRow = currentMap[r];
+    if (!currentRow) continue;
+
+    for (let c = 0; c < currentRow.length; c++) {
+      if (currentRow[c] === 2) count++;
+    }
+  }
+  return count;
 };
 
 const drawScene = () => {
   if (!ctx || !gameCanvas.value) return;
 
-  ctx.fillStyle = '#090d16';
+  ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, gameCanvas.value.width, gameCanvas.value.height);
 
   for (let row = 0; row < currentMap.length; row++) {
@@ -119,19 +145,33 @@ const drawScene = () => {
       const posY = row * TILE_SIZE + TILE_SIZE / 2;
 
       if (tile === 1) {
-        // Bloco de parede texturado (Linha 13, Coluna 2)
         atlas.draw(ctx, 2, 13, posX, posY, TILE_SIZE, 63, 66);
       } else if (tile === 2) {
-        // Ponto pequeno (Linha 9, Coluna 4)
-        atlas.draw(ctx, 4, 9, posX, posY, TILE_SIZE * 0.4, 63, 66);
+        // Se a maçã estiver ativa nesta mesma coordenada, não desenha o ponto pequeno para dar lugar à maçã
+        if (!(
+          appleItem.value.active &&
+          appleItem.value.col === col &&
+          appleItem.value.row === row
+        )) {
+          atlas.draw(ctx, 4, 9, posX, posY, TILE_SIZE * 0.4, 63, 66);
+        }
       }
     }
+  }
+
+  // Desenha a maçã exatamente centrada na coordenada do pino amarelo escolhido
+  if (appleItem.value.active) {
+    const appleX = appleItem.value.col * TILE_SIZE + TILE_SIZE / 2;
+    const appleY = appleItem.value.row * TILE_SIZE + TILE_SIZE / 2;
+
+    atlas.draw(ctx, 0, 15, appleX, appleY, TILE_SIZE * 0.8, 63, 66);
   }
 };
 
 const initGame = () => {
   score.value = 0;
   lives.value = 3;
+  level.value = 1;
   player.value.x = 48;
   player.value.y = 48;
   player.value.dx = 0;
@@ -141,8 +181,6 @@ const initGame = () => {
   enemies.value = [
     { x: 432, y: 432, size: 16, speed: 2, dx: 0, dy: -2, row: 3 },
     { x: 48, y: 432, size: 16, speed: 2, dx: -2, dy: 0, row: 6 },
-    { x: 432, y: 48, size: 16, speed: 2, dx: 0, dy: 2, row: 3 },
-    { x: 240, y: 240, size: 16, speed: 2, dx: 2, dy: 0, row: 6 },
   ];
 
   resetMap();
@@ -185,11 +223,11 @@ const handleKeyDown = (e: KeyboardEvent) => {
   player.value.dy = nextDy;
 };
 
+// Inteligência de Perseguição (Chasing AI)
 const updateEnemyAutonomous = (en: any) => {
   const nextX = en.x + en.dx;
   const nextY = en.y + en.dy;
 
-  // Margem ajustada para os inimigos também navegarem suavemente
   if (checkWallCollision(nextX, nextY, en.size - 7)) {
     const possibleMoves = [
       { dx: 0, dy: -en.speed },
@@ -203,10 +241,23 @@ const updateEnemyAutonomous = (en: any) => {
     );
 
     if (validMoves.length > 0) {
-      const chosen = validMoves[Math.floor(Math.random() * validMoves.length)];
-      if (chosen) {
-        en.dx = chosen.dx;
-        en.dy = chosen.dy;
+      let bestMove = validMoves[0];
+      let minDistance = Infinity;
+
+      for (const move of validMoves) {
+        const simulatedX = en.x + move.dx;
+        const simulatedY = en.y + move.dy;
+        const distance = Math.hypot(player.value.x - simulatedX, player.value.y - simulatedY);
+
+        if (distance < minDistance) {
+          minDistance = distance;
+          bestMove = move;
+        }
+      }
+
+      if (bestMove) {
+        en.dx = bestMove.dx;
+        en.dy = bestMove.dy;
       }
     } else {
       en.dx = -en.dx;
@@ -226,7 +277,6 @@ const gameLoop = () => {
   const nextX = player.value.x + player.value.dx;
   const nextY = player.value.y + player.value.dy;
 
-  // Margem ajustada de -4 para -7 para facilitar a entrada nos corredores e descidas
   if (!checkWallCollision(nextX, nextY, player.value.size - 7)) {
     player.value.x = nextX;
     player.value.y = nextY;
@@ -248,12 +298,51 @@ const gameLoop = () => {
     if (currentRow && currentRow[currentTileCol] === 2) {
       currentRow[currentTileCol] = 0;
       score.value += 10;
+
+      if (countRemainingDots() === 0) {
+        level.value += 1;
+        resetMap();
+
+        const ghostSpeed = Math.min(2 + Math.floor(level.value / 2), 4);
+        enemies.value.push(
+          {
+            x: 3 * TILE_SIZE,
+            y: 3 * TILE_SIZE,
+            size: 16,
+            speed: ghostSpeed,
+            dx: 0,
+            dy: ghostSpeed,
+            row: 3,
+          },
+          {
+            x: 3 * TILE_SIZE,
+            y: 3 * TILE_SIZE,
+            size: 16,
+            speed: ghostSpeed,
+            dx: -ghostSpeed,
+            dy: 0,
+            row: 6,
+          },
+        );
+      }
+    }
+  }
+
+  // Verifica se o jogador apanhou a maçã com base na grelha exata
+  if (appleItem.value.active) {
+    const appleX = appleItem.value.col * TILE_SIZE + TILE_SIZE / 2;
+    const appleY = appleItem.value.row * TILE_SIZE + TILE_SIZE / 2;
+    const distanceToApple = Math.hypot(player.value.x - appleX, player.value.y - appleY);
+
+    if (distanceToApple < 10) {
+      lives.value += 1; // Recupera vida
+      appleItem.value.active = false;
+      score.value += 50;
     }
   }
 
   drawScene();
 
-  // Atualiza e desenha os Inimigos
   for (const en of enemies.value) {
     updateEnemyAutonomous(en);
 
@@ -275,13 +364,11 @@ const gameLoop = () => {
     }
   }
 
-  // Mapeia a direção do jogador para a coluna correta do atlas
   let playerCol = 0;
   if (player.value.direction === 'UP') playerCol = 1;
   else if (player.value.direction === 'LEFT') playerCol = 2;
   else if (player.value.direction === 'RIGHT') playerCol = 3;
 
-  // Desenha o Jogador (Robô Azul na Linha 0)
   atlas.draw(ctx, playerCol, 0, player.value.x, player.value.y, TILE_SIZE, 63, 66);
 
   animationFrameId = requestAnimationFrame(gameLoop);
@@ -290,16 +377,18 @@ const gameLoop = () => {
 
 <style scoped>
 .game-canvas {
-  background-color: #090d16;
-  border: 2px solid #1e293b;
+  background-color: black;
+  border: 2px solid #1f2937;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 .canvas-container {
   position: relative;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: 12px;
 }
 .overlay-bg {
-  background-color: rgba(9, 13, 22, 0.85);
+  background-color: rgba(0, 0, 0, 0.85);
   backdrop-filter: blur(4px);
 }
 .font-mono {
