@@ -135,11 +135,12 @@ const drawScene = () => {
 
     for (let col = 0; col < currentRow.length; col++) {
       const tile = currentRow[col];
+      // Restabelece o posicionamento centrado exigido pelo atlas.draw para evitar falhas visuais
       const posX = col * TILE_SIZE + TILE_SIZE / 2;
       const posY = row * TILE_SIZE + TILE_SIZE / 2;
 
       if (tile === 1) {
-        atlas.draw(ctx, 2, 13, posX, posY, TILE_SIZE, 60, 66);
+        atlas.draw(ctx, 2, 13, posX, posY, TILE_SIZE, 63, 66);
       } else if (tile === 2) {
         if (!(
           appleItem.value.active &&
@@ -295,39 +296,30 @@ const gameLoop = () => {
         level.value += 1;
         resetMap();
 
+        player.value.x = 48;
+        player.value.y = 48;
+        player.value.dx = 0;
+        player.value.dy = 0;
+
         const ghostSpeed = Math.min(2 + Math.floor(level.value / 2), 4);
-        enemies.value.push(
-          {
-            x: 3 * TILE_SIZE,
-            y: 3 * TILE_SIZE,
-            size: 16,
-            speed: ghostSpeed,
-            dx: 0,
-            dy: ghostSpeed,
-            row: 3,
-          },
-          {
-            x: 3 * TILE_SIZE,
-            y: 3 * TILE_SIZE,
-            size: 16,
-            speed: ghostSpeed,
-            dx: -ghostSpeed,
-            dy: 0,
-            row: 6,
-          },
-        );
+
+        // 3 fantasmas dinâmicos na 2ª ronda posicionados nos cantos com segurança
+        enemies.value = [
+          { x: 432, y: 48, size: 16, speed: ghostSpeed, dx: -ghostSpeed, dy: 0, row: 3 },
+          { x: 48, y: 432, size: 16, speed: ghostSpeed, dx: 0, dy: -ghostSpeed, row: 4 },
+          { x: 432, y: 432, size: 16, speed: ghostSpeed, dx: -ghostSpeed, dy: 0, row: 6 },
+        ];
       }
     }
   }
 
-  // Verifica se o jogador apanhou a maçã com base na grelha exata
   if (appleItem.value.active) {
     const appleX = appleItem.value.col * TILE_SIZE + TILE_SIZE / 2;
     const appleY = appleItem.value.row * TILE_SIZE + TILE_SIZE / 2;
     const distanceToApple = Math.hypot(player.value.x - appleX, player.value.y - appleY);
 
     if (distanceToApple < 10) {
-      lives.value += 1; // Recupera vida
+      lives.value += 1;
       appleItem.value.active = false;
       score.value += 50;
     }
@@ -338,7 +330,7 @@ const gameLoop = () => {
   for (const en of enemies.value) {
     updateEnemyAutonomous(en);
 
-    atlas.draw(ctx, 0, en.row, en.x, en.y, TILE_SIZE, 60, 66);
+    atlas.draw(ctx, 0, en.row, en.x, en.y, TILE_SIZE, 63, 66);
 
     const distanceToEnemy = Math.hypot(player.value.x - en.x, player.value.y - en.y);
 
