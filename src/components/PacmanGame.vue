@@ -66,6 +66,7 @@ const gameState = ref<GameState>('MENU');
 let ctx: CanvasRenderingContext2D | null = null;
 let animationFrameId: number;
 let currentMap: number[][] = [];
+let invulnerableTimer: number = 0; // Controlo de imunidade para evitar duplo dano
 
 // Contexto de Áudio da Web Audio API para gerar efeitos sonoros instantâneos
 let audioCtx: AudioContext | null = null;
@@ -87,8 +88,8 @@ const playEatDotSound = () => {
     const gain = audioCtx.createGain();
 
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(440, audioCtx.currentTime); // Nota inicial Lá
-    osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.08); // Sobe o tom rapidamente
+    osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.08);
 
     gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
@@ -137,9 +138,9 @@ const playDeathSound = () => {
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
 
-    osc.type = 'sawtooth'; // Som mais áspero tipo erro/explosão retro
+    osc.type = 'sawtooth';
     osc.frequency.setValueAtTime(350, now);
-    osc.frequency.exponentialRampToValueAtTime(80, now + 0.4); // Desce o tom acentuadamente
+    osc.frequency.exponentialRampToValueAtTime(80, now + 0.4);
 
     gain.gain.setValueAtTime(0.25, now);
     gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
@@ -166,16 +167,11 @@ const player = ref({
   direction: 'RIGHT' as Direction,
 });
 
-const enemies = ref([
-  { x: 432, y: 432, size: 16, speed: 2, dx: 0, dy: -2, row: 3 },
-  { x: 48, y: 432, size: 16, speed: 2, dx: -2, dy: 0, row: 6 },
-]);
+// Lista dinâmica de inimigos
+const enemies = ref<any[]>([]);
 
-const appleItem = ref<{ col: number; row: number; active: boolean }>({
-  col: 3,
-  row: 3,
-  active: false,
-});
+// Lista dinâmica de maçãs ativas no mapa
+const apples = ref<{ col: number; row: number; active: boolean }[]>([]);
 
 onMounted(() => {
   if (gameCanvas.value) {
@@ -192,9 +188,67 @@ onUnmounted(() => {
   cancelAnimationFrame(animationFrameId);
 });
 
+const spawnApples = () => {
+  apples.value = [];
+
+  // Regra exata: Nível 1 = 2 maçãs, Nível 2 = 3 maçãs, Nível 3 = 4 maçãs, etc.
+  const appleCount = level.value + 1;
+
+  const availableCorridors: { col: number; row: number }[] = [];
+  for (let r = 0; r < currentMap.length; r++) {
+    const row = currentMap[r];
+    if (!row) continue;
+    for (let c = 0; c < row.length; c++) {
+      if ((row[c] === 0 || row[c] === 2) && !(c === 1 && r === 1)) {
+        availableCorridors.push({ col: c, row: r });
+      }
+    }
+  }
+
+  for (let i = 0; i < appleCount && availableCorridors.length > 0; i++) {
+    const index = Math.floor(i * (availableCorridors.length / appleCount));
+    const spot = availableCorridors[index] || availableCorridors[0];
+
+    if (spot) {
+      apples.value.push({ col: spot.col, row: spot.row, active: true });
+      availableCorridors.splice(index, 1);
+    }
+  }
+};
+
+const spawnEnemiesForLevel = () => {
+  const ghostCount = 1 + level.value;
+  const newEnemies = [];
+
+  const basePositions = [
+    { x: 432, y: 432, dx: 0, dy: -2, row: 3 },
+    { x: 48, y: 432, dx: -2, dy: 0, row: 6 },
+    { x: 432, y: 48, dx: -2, dy: 0, row: 4 },
+    { x: 48, y: 48, dx: 2, dy: 0, row: 3 },
+    { x: 240, y: 432, dx: 0, dy: -2, row: 6 },
+  ];
+
+  for (let i = 0; i < ghostCount; i++) {
+    const pos = basePositions[i % basePositions.length];
+    if (pos) {
+      newEnemies.push({
+        x: pos.x,
+        y: pos.y,
+        size: 16,
+        speed: 2,
+        dx: pos.dx,
+        dy: pos.dy,
+        row: pos.row,
+      });
+    }
+  }
+  enemies.value = newEnemies;
+};
+
 const resetMap = () => {
   currentMap = MAZE_GRID.map((row) => [...row]);
-  appleItem.value.active = true;
+  spawnApples();
+  spawnEnemiesForLevel();
 };
 
 const countRemainingDots = (): number => {
@@ -228,22 +282,20 @@ const drawScene = () => {
       if (tile === 1) {
         atlas.draw(ctx, 2, 13, posX, posY, TILE_SIZE, 63, 66);
       } else if (tile === 2) {
-        if (!(
-          appleItem.value.active &&
-          appleItem.value.col === col &&
-          appleItem.value.row === row
-        )) {
+        const hasAppleHere = apples.value.some((a) => a.active && a.col === col && a.row === row);
+        if (!hasAppleHere) {
           atlas.draw(ctx, 4, 9, posX, posY, TILE_SIZE * 0.4, 63, 66);
         }
       }
     }
   }
 
-  if (appleItem.value.active) {
-    const appleX = appleItem.value.col * TILE_SIZE + TILE_SIZE / 2;
-    const appleY = appleItem.value.row * TILE_SIZE + TILE_SIZE / 2;
-
-    atlas.draw(ctx, 0, 15, appleX, appleY, TILE_SIZE * 0.8, 63, 66);
+  for (const apple of apples.value) {
+    if (apple.active) {
+      const appleX = apple.col * TILE_SIZE + TILE_SIZE / 2;
+      const appleY = apple.row * TILE_SIZE + TILE_SIZE / 2;
+      atlas.draw(ctx, 0, 15, appleX, appleY, TILE_SIZE * 0.8, 63, 66);
+    }
   }
 };
 
@@ -252,16 +304,12 @@ const initGame = () => {
   score.value = 0;
   lives.value = 3;
   level.value = 1;
+  invulnerableTimer = 0;
   player.value.x = 48;
   player.value.y = 48;
   player.value.dx = 0;
   player.value.dy = 0;
   player.value.direction = 'RIGHT';
-
-  enemies.value = [
-    { x: 432, y: 432, size: 16, speed: 2, dx: 0, dy: -2, row: 3 },
-    { x: 48, y: 432, size: 16, speed: 2, dx: -2, dy: 0, row: 6 },
-  ];
 
   resetMap();
   gameState.value = 'PLAYING';
@@ -353,6 +401,11 @@ const gameLoop = () => {
     return;
   }
 
+  // Reduz o tempo de invulnerabilidade a cada frame se estiver ativo
+  if (invulnerableTimer > 0) {
+    invulnerableTimer--;
+  }
+
   const nextX = player.value.x + player.value.dx;
   const nextY = player.value.y + player.value.dy;
 
@@ -387,28 +440,23 @@ const gameLoop = () => {
         player.value.y = 48;
         player.value.dx = 0;
         player.value.dy = 0;
-
-        const ghostSpeed = Math.min(2 + Math.floor(level.value / 2), 4);
-
-        enemies.value = [
-          { x: 432, y: 48, size: 16, speed: ghostSpeed, dx: -ghostSpeed, dy: 0, row: 3 },
-          { x: 48, y: 432, size: 16, speed: ghostSpeed, dx: 0, dy: -ghostSpeed, row: 4 },
-          { x: 432, y: 432, size: 16, speed: ghostSpeed, dx: -ghostSpeed, dy: 0, row: 6 },
-        ];
+        invulnerableTimer = 60; // 1 segundo de segurança ao mudar de nível
       }
     }
   }
 
-  if (appleItem.value.active) {
-    const appleX = appleItem.value.col * TILE_SIZE + TILE_SIZE / 2;
-    const appleY = appleItem.value.row * TILE_SIZE + TILE_SIZE / 2;
-    const distanceToApple = Math.hypot(player.value.x - appleX, player.value.y - appleY);
+  for (const apple of apples.value) {
+    if (apple.active) {
+      const appleX = apple.col * TILE_SIZE + TILE_SIZE / 2;
+      const appleY = apple.row * TILE_SIZE + TILE_SIZE / 2;
+      const distanceToApple = Math.hypot(player.value.x - appleX, player.value.y - appleY);
 
-    if (distanceToApple < 10) {
-      lives.value += 1;
-      appleItem.value.active = false;
-      score.value += 50;
-      playEatAppleSound();
+      if (distanceToApple < 12) {
+        lives.value += 1;
+        apple.active = false;
+        score.value += 50;
+        playEatAppleSound();
+      }
     }
   }
 
@@ -417,23 +465,27 @@ const gameLoop = () => {
   for (const en of enemies.value) {
     updateEnemyAutonomous(en);
 
-    atlas.draw(ctx, 0, en.row, en.x, en.y, TILE_SIZE, 63, 66);
+    // Efeito visual de piscar caso esteja invulnerável
+    if (invulnerableTimer === 0 || Math.floor(invulnerableTimer / 4) % 2 === 0) {
+      atlas.draw(ctx, 0, en.row, en.x, en.y, TILE_SIZE, 63, 66);
+    }
 
     const distanceToEnemy = Math.hypot(player.value.x - en.x, player.value.y - en.y);
 
-    if (distanceToEnemy < player.value.size + en.size - 8) {
+    // Só processa dano se NÃO estiver no período de invulnerabilidade
+    if (distanceToEnemy < player.value.size + en.size - 8 && invulnerableTimer === 0) {
       lives.value -= 1;
-
-      // Toca o efeito sonoro de erro/morte ao perder vida
       playDeathSound();
 
       if (lives.value <= 0) {
         gameState.value = 'GAMEOVER';
       } else {
+        // Reseta posição e dá 90 frames (aprox 1.5 segundos) de imunidade absoluta
         player.value.x = 48;
         player.value.y = 48;
         player.value.dx = 0;
         player.value.dy = 0;
+        invulnerableTimer = 90;
       }
       break;
     }
@@ -444,7 +496,10 @@ const gameLoop = () => {
   else if (player.value.direction === 'LEFT') playerCol = 2;
   else if (player.value.direction === 'RIGHT') playerCol = 3;
 
-  atlas.draw(ctx, playerCol, 0, player.value.x, player.value.y, TILE_SIZE, 63, 66);
+  // Pacman também pisca visualmente durante a invulnerabilidade
+  if (invulnerableTimer === 0 || Math.floor(invulnerableTimer / 4) % 2 === 0) {
+    atlas.draw(ctx, playerCol, 0, player.value.x, player.value.y, TILE_SIZE, 63, 66);
+  }
 
   animationFrameId = requestAnimationFrame(gameLoop);
 };
