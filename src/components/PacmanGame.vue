@@ -16,6 +16,9 @@
         <div>
           STATE: <span class="text-blue">{{ gameState }}</span>
         </div>
+        <div v-if="powerTimer > 0">
+          PODER: <span class="text-purple">{{ Math.ceil(powerTimer / 60) }}s</span>
+        </div>
       </div>
 
       <!-- Container adaptativo para o Canvas -->
@@ -122,6 +125,7 @@ let ctx: CanvasRenderingContext2D | null = null;
 let animationFrameId: number;
 let currentMap: number[][] = [];
 let invulnerableTimer: number = 0;
+let powerTimer: number = 0;
 
 let audioCtx: AudioContext | null = null;
 
@@ -174,6 +178,27 @@ const playEatAppleSound = () => {
   }
 };
 
+const playEatStarSound = () => {
+  if (!audioCtx) return;
+  try {
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(600, now);
+    osc.frequency.setValueAtTime(900, now + 0.1);
+    osc.frequency.setValueAtTime(1200, now + 0.2);
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(now + 0.4);
+  } catch (e) {
+    console.error(e);
+  }
+};
+
 const playDeathSound = () => {
   if (!audioCtx) return;
   try {
@@ -209,6 +234,7 @@ const player = ref({
 
 const enemies = ref<any[]>([]);
 const apples = ref<{ col: number; row: number; active: boolean }[]>([]);
+const stars = ref<{ col: number; row: number; active: boolean }[]>([]);
 
 onMounted(() => {
   setupCanvasContext();
@@ -229,27 +255,41 @@ const setupCanvasContext = () => {
   }
 };
 
-const spawnApples = () => {
+const spawnApplesAndStars = () => {
   apples.value = [];
+  stars.value = [];
   const appleCount = level.value + 1;
-  const availableCorridors: { col: number; row: number }[] = [];
+  const availableDots: { col: number; row: number }[] = [];
 
   for (let r = 0; r < currentMap.length; r++) {
     const row = currentMap[r];
     if (!row) continue;
     for (let c = 0; c < row.length; c++) {
-      if ((row[c] === 0 || row[c] === 2) && !(c === 1 && r === 1)) {
-        availableCorridors.push({ col: c, row: r });
+      if (row[c] === 2 && !(c === 1 && r === 1)) {
+        availableDots.push({ col: c, row: r });
       }
     }
   }
 
-  for (let i = 0; i < appleCount && availableCorridors.length > 0; i++) {
-    const index = Math.floor(i * (availableCorridors.length / appleCount));
-    const spot = availableCorridors[index] || availableCorridors[0];
+  for (let i = availableDots.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const temp = availableDots[i]!;
+    availableDots[i] = availableDots[j]!;
+    availableDots[j] = temp;
+  }
+
+  for (let i = 0; i < appleCount && availableDots.length > 0; i++) {
+    const spot = availableDots.pop();
     if (spot) {
       apples.value.push({ col: spot.col, row: spot.row, active: true });
-      availableCorridors.splice(index, 1);
+    }
+  }
+
+  const starCount = Math.max(0, level.value - 1);
+  for (let i = 0; i < starCount && availableDots.length > 0; i++) {
+    const starSpot = availableDots.pop();
+    if (starSpot) {
+      stars.value.push({ col: starSpot.col, row: starSpot.row, active: true });
     }
   }
 };
@@ -257,12 +297,16 @@ const spawnApples = () => {
 const spawnEnemiesForLevel = () => {
   const ghostCount = 1 + level.value;
   const newEnemies = [];
+
+  // A partir do nível 5, aumenta a velocidade dos inimigos progressivamente
+  const enemySpeed = level.value >= 5 ? 2 + (level.value - 4) * 0.5 : 2;
+
   const basePositions = [
-    { x: 432, y: 432, dx: 0, dy: -2, row: 3 },
-    { x: 48, y: 432, dx: -2, dy: 0, row: 6 },
-    { x: 432, y: 48, dx: -2, dy: 0, row: 4 },
-    { x: 48, y: 48, dx: 2, dy: 0, row: 3 },
-    { x: 240, y: 432, dx: 0, dy: -2, row: 6 },
+    { x: 432, y: 432, dx: 0, dy: -enemySpeed, row: 3 },
+    { x: 48, y: 432, dx: -enemySpeed, dy: 0, row: 6 },
+    { x: 432, y: 48, dx: -enemySpeed, dy: 0, row: 4 },
+    { x: 48, y: 48, dx: enemySpeed, dy: 0, row: 3 },
+    { x: 240, y: 432, dx: 0, dy: -enemySpeed, row: 6 },
   ];
 
   for (let i = 0; i < ghostCount; i++) {
@@ -272,7 +316,7 @@ const spawnEnemiesForLevel = () => {
         x: pos.x,
         y: pos.y,
         size: 16,
-        speed: 2,
+        speed: enemySpeed,
         dx: pos.dx,
         dy: pos.dy,
         row: pos.row,
@@ -284,7 +328,7 @@ const spawnEnemiesForLevel = () => {
 
 const resetMap = () => {
   currentMap = MAZE_GRID.map((row) => [...row]);
-  spawnApples();
+  spawnApplesAndStars();
   spawnEnemiesForLevel();
 };
 
@@ -320,7 +364,8 @@ const drawScene = () => {
         atlas.draw(ctx, 2, 13, posX, posY, TILE_SIZE, 63, 66);
       } else if (tile === 2) {
         const hasAppleHere = apples.value.some((a) => a.active && a.col === col && a.row === row);
-        if (!hasAppleHere) {
+        const hasStarHere = stars.value.some((s) => s.active && s.col === col && s.row === row);
+        if (!hasAppleHere && !hasStarHere) {
           atlas.draw(ctx, 4, 9, posX, posY, TILE_SIZE * 0.4, 63, 66);
         }
       }
@@ -334,6 +379,14 @@ const drawScene = () => {
       atlas.draw(ctx, 0, 15, appleX, appleY, TILE_SIZE * 0.8, 63, 66);
     }
   }
+
+  for (const star of stars.value) {
+    if (star.active) {
+      const starX = star.col * TILE_SIZE + TILE_SIZE / 2;
+      const starY = star.row * TILE_SIZE + TILE_SIZE / 2;
+      atlas.draw(ctx, 5, 15, starX, starY, TILE_SIZE * 0.8, 63, 66);
+    }
+  }
 };
 
 const initGame = () => {
@@ -342,6 +395,7 @@ const initGame = () => {
   lives.value = 3;
   level.value = 1;
   invulnerableTimer = 0;
+  powerTimer = 0;
   player.value.x = 48;
   player.value.y = 48;
   player.value.dx = player.value.speed;
@@ -476,6 +530,10 @@ const gameLoop = () => {
     invulnerableTimer--;
   }
 
+  if (powerTimer > 0) {
+    powerTimer--;
+  }
+
   if (player.value.nextDirection !== player.value.direction) {
     const nextVels = getVelocitiesForDir(player.value.nextDirection);
     const testX = player.value.x + nextVels.vx;
@@ -543,33 +601,57 @@ const gameLoop = () => {
     }
   }
 
+  for (const star of stars.value) {
+    if (star.active) {
+      const starX = star.col * TILE_SIZE + TILE_SIZE / 2;
+      const starY = star.row * TILE_SIZE + TILE_SIZE / 2;
+      const distanceToStar = Math.hypot(player.value.x - starX, player.value.y - starY);
+
+      if (distanceToStar < 12) {
+        star.active = false;
+        score.value += 200;
+        powerTimer = 600;
+        playEatStarSound();
+      }
+    }
+  }
+
   drawScene();
 
-  for (const en of enemies.value) {
+  for (let i = enemies.value.length - 1; i >= 0; i--) {
+    const en = enemies.value[i];
     updateEnemyAutonomous(en);
 
-    if (invulnerableTimer === 0 || Math.floor(invulnerableTimer / 4) % 2 === 0) {
+    if (powerTimer > 0) {
+      atlas.draw(ctx, 5, en.row, en.x, en.y, TILE_SIZE, 63, 66);
+    } else if (invulnerableTimer === 0 || Math.floor(invulnerableTimer / 4) % 2 === 0) {
       atlas.draw(ctx, 0, en.row, en.x, en.y, TILE_SIZE, 63, 66);
     }
 
     const distanceToEnemy = Math.hypot(player.value.x - en.x, player.value.y - en.y);
 
-    if (distanceToEnemy < player.value.size + en.size - 8 && invulnerableTimer === 0) {
-      lives.value -= 1;
-      playDeathSound();
+    if (distanceToEnemy < player.value.size + en.size - 8) {
+      if (powerTimer > 0) {
+        score.value += 100;
+        en.x = 240;
+        en.y = 240;
+      } else if (invulnerableTimer === 0) {
+        lives.value -= 1;
+        playDeathSound();
 
-      if (lives.value <= 0) {
-        gameState.value = 'GAMEOVER';
-      } else {
-        player.value.x = 48;
-        player.value.y = 48;
-        player.value.dx = player.value.speed;
-        player.value.dy = 0;
-        player.value.direction = 'RIGHT';
-        player.value.nextDirection = 'RIGHT';
-        invulnerableTimer = 90;
+        if (lives.value <= 0) {
+          gameState.value = 'GAMEOVER';
+        } else {
+          player.value.x = 48;
+          player.value.y = 48;
+          player.value.dx = player.value.speed;
+          player.value.dy = 0;
+          player.value.direction = 'RIGHT';
+          player.value.nextDirection = 'RIGHT';
+          invulnerableTimer = 90;
+        }
+        break;
       }
-      break;
     }
   }
 
