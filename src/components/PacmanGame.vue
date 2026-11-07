@@ -2,7 +2,7 @@
   <q-page class="flex flex-center bg-grey-10 text-white q-pa-md game-page">
     <div class="column items-center q-pa-xs full-width">
       <div
-        class="row q-mb-sm q-gutter-md sm:q-gutter-xl text-subtitle1 sm:text-h6 font-mono text-weight-bold justify-center text-center"
+        class="row q-mb-sm q-gutter-md sm:q-gutter-xl text-subtitle1 sm:text-h6 font-mono text-weight-bold justify-center text-center items-center"
       >
         <div>
           SCORE: <span class="text-amber">{{ score }}</span>
@@ -13,15 +13,33 @@
         <div>
           LEVEL: <span class="text-green">{{ level }}</span>
         </div>
-        <div>
-          STATE: <span class="text-blue">{{ gameState }}</span>
-        </div>
         <div v-if="powerTimer > 0">
           PODER: <span class="text-purple">{{ Math.ceil(powerTimer / 60) }}s</span>
         </div>
-      </div>
 
-      <!-- Container adaptativo para o Canvas -->
+        <div class="row q-gutter-xs" v-if="gameState === 'PLAYING' || gameState === 'PAUSED'">
+          <q-btn
+            color="orange-8"
+            text-color="white"
+            size="sm"
+            dense
+            flat
+            icon="pause"
+            :label="gameState === 'PAUSED' ? 'Continuar' : 'Pausar'"
+            @click="togglePause"
+          />
+          <q-btn
+            color="red-8"
+            text-color="white"
+            size="sm"
+            dense
+            flat
+            icon="refresh"
+            label="Reiniciar"
+            @click="initGame"
+          />
+        </div>
+      </div>
       <div class="canvas-container relative-position q-my-sm">
         <canvas
           ref="gameCanvas"
@@ -34,30 +52,52 @@
         <div
           v-if="gameState !== 'PLAYING'"
           class="absolute-full flex flex-center overlay-bg column q-gutter-md text-center q-pa-md"
+          :class="{ 'victory-overlay': gameState === 'VICTORY' }"
         >
-          <div class="text-h4 text-weight-bold text-amber">
-            {{ gameState === 'MENU' ? 'MEGA PACMAN' : 'GAME OVER' }}
+          <div
+            class="text-h4 text-weight-bold"
+            :class="gameState === 'VICTORY' ? 'text-green-4 victory-title' : 'text-amber'"
+          >
+            {{
+              gameState === 'MENU'
+                ? 'MEGA PACMAN'
+                : gameState === 'PAUSED'
+                  ? 'JOGO PAUSADO'
+                  : gameState === 'VICTORY'
+                    ? '🎉 PARABÉNS! VITÓRIA! 🎉'
+                    : 'GAME OVER'
+            }}
           </div>
-          <div v-if="gameState === 'GAMEOVER'" class="text-subtitle1 text-grey-4">
+          <div
+            v-if="gameState === 'GAMEOVER' || gameState === 'VICTORY'"
+            class="text-subtitle1 text-grey-4"
+          >
             Pontuação Final: {{ score }}
           </div>
+          <div v-if="gameState === 'VICTORY'" class="text-caption text-amber-3">
+            Você completou todos os níveis com maestria!
+          </div>
           <q-btn
-            color="amber"
+            :color="gameState === 'VICTORY' ? 'green-5' : 'amber'"
             text-color="dark"
             size="lg"
             icon="play_arrow"
-            :label="gameState === 'MENU' ? 'Iniciar Jogo' : 'Tentar Novamente'"
-            @click.stop="initGame"
+            :label="
+              gameState === 'MENU'
+                ? 'Iniciar Jogo'
+                : gameState === 'PAUSED'
+                  ? 'Continuar Jogo'
+                  : 'Jogar Novamente'
+            "
+            @click.stop="gameState === 'PAUSED' ? togglePause() : initGame()"
           />
         </div>
       </div>
 
-      <!-- Botões Virtuais de Direção (D-Pad em T Invertido) -->
       <div
         v-if="gameState === 'PLAYING'"
         class="column items-center q-mt-sm q-gutter-xs d-pad-container"
       >
-        <!-- Primeira Fila: Apenas a seta Cima -->
         <q-btn
           color="amber"
           text-color="dark"
@@ -67,8 +107,6 @@
           @touchstart.prevent.stop="setDirection('UP')"
           @click.stop="setDirection('UP')"
         />
-
-        <!-- Segunda Fila: Esquerda, Baixo e Direita lado a lado -->
         <div class="row q-gutter-sm">
           <q-btn
             style="margin-left: 10px"
@@ -111,21 +149,35 @@ import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 import { MAZE_GRID, TILE_SIZE } from '../game/maze';
 import { checkWallCollision } from '../game/collision';
 import { SpriteAtlas } from '../game/spriteAtlas';
-import type { GameState, Direction } from '../game/types';
+import type { Direction } from '../game/types';
 
 import atlasImage from '../assets/pacman_atlas.jpg';
+
+type ExtendedGameState = 'MENU' | 'PLAYING' | 'PAUSED' | 'GAMEOVER' | 'VICTORY';
 
 const gameCanvas = ref<HTMLCanvasElement | null>(null);
 const score = ref<number>(0);
 const lives = ref<number>(3);
 const level = ref<number>(1);
-const gameState = ref<GameState>('MENU');
+const gameState = ref<ExtendedGameState>('MENU');
 
 let ctx: CanvasRenderingContext2D | null = null;
 let animationFrameId: number;
 let currentMap: number[][] = [];
 let invulnerableTimer: number = 0;
 let powerTimer: number = 0;
+
+let victoryConfetti: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  vy: number;
+  vx: number;
+  rot: number;
+  vRot: number;
+}[] = [];
 
 let audioCtx: AudioContext | null = null;
 
@@ -138,82 +190,71 @@ const initAudio = () => {
   }
 };
 
-const playEatDotSound = () => {
-  if (!audioCtx) return;
-  try {
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(440, audioCtx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.08);
-    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + 0.08);
-  } catch (e) {
-    console.error(e);
-  }
-};
-
-const playEatAppleSound = () => {
+const playSound = (type: 'dot' | 'apple' | 'star' | 'death' | 'victory') => {
   if (!audioCtx) return;
   try {
     const now = audioCtx.currentTime;
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(300, now);
-    osc.frequency.setValueAtTime(500, now + 0.08);
-    osc.frequency.setValueAtTime(750, now + 0.16);
-    gain.gain.setValueAtTime(0.2, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(now + 0.3);
-  } catch (e) {
-    console.error(e);
-  }
-};
 
-const playEatStarSound = () => {
-  if (!audioCtx) return;
-  try {
-    const now = audioCtx.currentTime;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'square';
-    osc.frequency.setValueAtTime(600, now);
-    osc.frequency.setValueAtTime(900, now + 0.1);
-    osc.frequency.setValueAtTime(1200, now + 0.2);
-    gain.gain.setValueAtTime(0.2, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(now + 0.4);
-  } catch (e) {
-    console.error(e);
-  }
-};
-
-const playDeathSound = () => {
-  if (!audioCtx) return;
-  try {
-    const now = audioCtx.currentTime;
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(350, now);
-    osc.frequency.exponentialRampToValueAtTime(80, now + 0.4);
-    gain.gain.setValueAtTime(0.25, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(now + 0.4);
+    if (type === 'dot') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(440, now);
+      osc.frequency.exponentialRampToValueAtTime(880, now + 0.08);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(now + 0.08);
+    } else if (type === 'apple') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(300, now);
+      osc.frequency.setValueAtTime(500, now + 0.08);
+      osc.frequency.setValueAtTime(750, now + 0.16);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(now + 0.3);
+    } else if (type === 'star') {
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(600, now);
+      osc.frequency.setValueAtTime(900, now + 0.1);
+      osc.frequency.setValueAtTime(1200, now + 0.2);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(now + 0.4);
+    } else if (type === 'death') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(350, now);
+      osc.frequency.exponentialRampToValueAtTime(80, now + 0.4);
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(now + 0.4);
+    } else if (type === 'victory') {
+      // Fanfarra triunfante de notas
+      const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+      notes.forEach((freq, idx) => {
+        const noteOsc = audioCtx!.createOscillator();
+        const noteGain = audioCtx!.createGain();
+        noteOsc.type = 'triangle';
+        noteOsc.frequency.setValueAtTime(freq, now + idx * 0.15);
+        noteGain.gain.setValueAtTime(0.2, now + idx * 0.15);
+        noteGain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.15 + 0.4);
+        noteOsc.connect(noteGain);
+        noteGain.connect(audioCtx!.destination);
+        noteOsc.start(now + idx * 0.15);
+        noteOsc.stop(now + idx * 0.15 + 0.4);
+      });
+    }
   } catch (e) {
     console.error(e);
   }
@@ -297,8 +338,6 @@ const spawnApplesAndStars = () => {
 const spawnEnemiesForLevel = () => {
   const ghostCount = 1 + level.value;
   const newEnemies = [];
-
-  // A partir do nível 5, aumenta a velocidade dos inimigos progressivamente
   const enemySpeed = level.value >= 5 ? 2 + (level.value - 4) * 0.5 : 2;
 
   const basePositions = [
@@ -387,6 +426,53 @@ const drawScene = () => {
       atlas.draw(ctx, 5, 15, starX, starY, TILE_SIZE * 0.8, 63, 66);
     }
   }
+
+  // Efeito de papéis picados (confetes) caindo pelo céu/tela no fim do jogo
+  if (gameState.value === 'VICTORY') {
+    if (victoryConfetti.length === 0) {
+      for (let i = 0; i < 60; i++) {
+        victoryConfetti.push({
+          x: Math.random() * gameCanvas.value.width,
+          y: Math.random() * gameCanvas.value.height - gameCanvas.value.height,
+          w: Math.random() * 8 + 6,
+          h: Math.random() * 4 + 3,
+          color: ['#4ade80', '#fbbf24', '#f43f5e', '#60a5fa', '#c084fc', '#f472b6'][
+            Math.floor(Math.random() * 6)
+          ]!,
+          vy: Math.random() * 2 + 1.5,
+          vx: Math.sin(i) * 1.5,
+          rot: Math.random() * 360,
+          vRot: (Math.random() - 0.5) * 6,
+        });
+      }
+    }
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.fillRect(0, 0, gameCanvas.value.width, gameCanvas.value.height);
+
+    for (const p of victoryConfetti) {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate((p.rot * Math.PI) / 180);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
+
+      p.y += p.vy;
+      p.x += p.vx + Math.sin(p.y * 0.03) * 0.5;
+      p.rot += p.vRot;
+
+      if (p.y > gameCanvas.value.height) {
+        p.y = -10;
+        p.x = Math.random() * gameCanvas.value.width;
+      }
+    }
+  }
+};
+
+const triggerVictory = () => {
+  gameState.value = 'VICTORY';
+  playSound('victory');
 };
 
 const initGame = () => {
@@ -396,6 +482,7 @@ const initGame = () => {
   level.value = 1;
   invulnerableTimer = 0;
   powerTimer = 0;
+  victoryConfetti = [];
   player.value.x = 48;
   player.value.y = 48;
   player.value.dx = player.value.speed;
@@ -415,7 +502,24 @@ const initGame = () => {
   });
 };
 
+const togglePause = () => {
+  if (gameState.value === 'PLAYING') {
+    gameState.value = 'PAUSED';
+    cancelAnimationFrame(animationFrameId);
+  } else if (gameState.value === 'PAUSED') {
+    gameState.value = 'PLAYING';
+    animationFrameId = requestAnimationFrame(gameLoop);
+  }
+};
+
 const handleKeyDown = (e: KeyboardEvent) => {
+  if (e.key === 'p' || e.key === 'P') {
+    if (gameState.value === 'PLAYING' || gameState.value === 'PAUSED') {
+      togglePause();
+    }
+    return;
+  }
+
   if (gameState.value !== 'PLAYING') return;
 
   switch (e.key) {
@@ -516,9 +620,7 @@ const updateEnemyAutonomous = (en: any) => {
 };
 
 const gameLoop = () => {
-  if (gameState.value !== 'PLAYING') {
-    return;
-  }
+  if (gameState.value !== 'PLAYING') return;
 
   setupCanvasContext();
   if (!ctx || !gameCanvas.value) {
@@ -526,13 +628,8 @@ const gameLoop = () => {
     return;
   }
 
-  if (invulnerableTimer > 0) {
-    invulnerableTimer--;
-  }
-
-  if (powerTimer > 0) {
-    powerTimer--;
-  }
+  if (invulnerableTimer > 0) invulnerableTimer--;
+  if (powerTimer > 0) powerTimer--;
 
   if (player.value.nextDirection !== player.value.direction) {
     const nextVels = getVelocitiesForDir(player.value.nextDirection);
@@ -569,9 +666,14 @@ const gameLoop = () => {
     if (currentRow && currentRow[currentTileCol] === 2) {
       currentRow[currentTileCol] = 0;
       score.value += 10;
-      playEatDotSound();
+      playSound('dot');
 
       if (countRemainingDots() === 0) {
+        if (level.value >= 10) {
+          triggerVictory();
+          return;
+        }
+
         level.value += 1;
         resetMap();
 
@@ -596,7 +698,7 @@ const gameLoop = () => {
         lives.value += 1;
         apple.active = false;
         score.value += 50;
-        playEatAppleSound();
+        playSound('apple');
       }
     }
   }
@@ -611,7 +713,7 @@ const gameLoop = () => {
         star.active = false;
         score.value += 200;
         powerTimer = 600;
-        playEatStarSound();
+        playSound('star');
       }
     }
   }
@@ -637,7 +739,7 @@ const gameLoop = () => {
         en.y = 240;
       } else if (invulnerableTimer === 0) {
         lives.value -= 1;
-        playDeathSound();
+        playSound('death');
 
         if (lives.value <= 0) {
           gameState.value = 'GAMEOVER';
@@ -693,6 +795,34 @@ const gameLoop = () => {
   display: flex;
   justify-content: center;
   align-items: center;
+}
+
+.overlay-bg {
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(4px);
+}
+
+.victory-overlay {
+  background: radial-gradient(circle, rgba(22, 101, 52, 0.9) 0%, rgba(3, 7, 18, 0.95) 100%);
+}
+
+.victory-title {
+  animation: victory-glow 1.5s ease-in-out infinite alternate;
+}
+
+@keyframes victory-glow {
+  from {
+    text-shadow:
+      0 0 10px #4ade80,
+      0 0 20px #22c55e;
+    transform: scale(1);
+  }
+  to {
+    text-shadow:
+      0 0 20px #86efac,
+      0 0 35px #16a34a;
+    transform: scale(1.05);
+  }
 }
 
 .d-pad-container {
