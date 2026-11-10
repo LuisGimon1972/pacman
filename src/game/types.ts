@@ -1,18 +1,20 @@
-export type Direction = 'UP' | 'DOWN' | 'LEFT' | 'RIGHT' | null;
+export type GameState = 'MENU' | 'PLAYING' | 'VICTORY' | 'GAMEOVER';
 
-export interface GameObject {
-  x: number;
-  y: number;
-  size: number;
-  speed: number;
-  dx: number;
-  dy: number;
-  direction: Direction;
+export interface Cell {
+  id: number;
+  row: number;
+  col: number;
+  isTrap: boolean;
+  isRevealed: boolean;
+  isPotionMarked: boolean;
+  neighborTraps: number;
+  isSafeHinted?: boolean;
 }
 
-export interface Enemy extends GameObject {
-  type: 'hunter' | 'blocker';
-  color: string;
+export interface Hero {
+  hp: number;
+  maxHp: number;
+  potions: number;
+  score: number;
+  specialSkillCooldown: number;
 }
-
-export type GameState = 'MENU' | 'PLAYING' | 'PAUSED' | 'GAMEOVER';

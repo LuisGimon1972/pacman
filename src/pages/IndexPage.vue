@@ -1,9 +1,9 @@
 <template>
   <q-page class="flex flex-center bg-green-10">
-    <PacmanBoard />
+    <DungeonBoard />
   </q-page>
 </template>
 
 <script setup lang="ts">
-import PacmanBoard from 'src/components/PacmanGame.vue';
+import DungeonBoard from 'src/components/DungeonGame.vue';
 </script>
